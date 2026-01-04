@@ -109,4 +109,4 @@ Nhóm đã thực hiện huấn luyện và đánh giá model với các thông 
 * **Độ chính xác (mAP@50):** > 0.90.
 * **Tốc độ:** ~10-15 FPS (CPU i5).
 
-*Đồ án môn học Thị Giác Máy Tính - 2024*
+*Đồ án môn học Thị Giác Máy Tính - 2026*
