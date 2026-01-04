@@ -1,0 +1,256 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Hệ Thống Giám Sát PPE AI</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        body { background-color: #f4f6f9; }
+        .video-container {
+            background: #000;
+            border-radius: 10px;
+            overflow: hidden;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+            min-height: 480px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        #videoFeed {
+            width: 100%;
+            height: auto;
+            display: block;
+        }
+        .status-card {
+            height: 100%;
+            border: none;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.05);
+        }
+        .status-safe { color: #198754; font-weight: bold; }
+        .status-unsafe { color: #dc3545; font-weight: bold; }
+        .missing-item {
+            background-color: #ffe6e6;
+            color: #d63384;
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-size: 0.9em;
+            margin-right: 4px;
+        }
+        /* Hiệu ứng nhấp nháy cho trạng thái kết nối */
+        .live-indicator {
+            width: 10px; height: 10px;
+            background-color: #ccc;
+            border-radius: 50%;
+            display: inline-block;
+            margin-right: 5px;
+        }
+        .live-active { background-color: #198754; box-shadow: 0 0 5px #198754; }
+    </style>
+</head>
+<body>
+
+<nav class="navbar navbar-expand-lg navbar-dark bg-dark mb-4">
+    <div class="container-fluid">
+        <a class="navbar-brand" href="#">🚧 AI Safety Monitor (YOLOv8)</a>
+        <span class="text-white" id="connectionStatus">
+            <span class="live-indicator" id="liveDot"></span>
+            <span id="apiAddress">Connecting...</span>
+        </span>
+    </div>
+</nav>
+
+<div class="container-fluid px-4">
+    <div class="row">
+        <div class="col-lg-8 mb-4">
+            <div class="card status-card">
+                <div class="card-header bg-white d-flex justify-content-between align-items-center">
+                    <h5 class="mb-0">🎥 Camera Live Stream</h5>
+                    <div>
+                        <button class="btn btn-success btn-sm me-2" onclick="startCamera()">▶ Bật Camera</button>
+                        <button class="btn btn-danger btn-sm" onclick="stopCamera()">⏹ Tắt Camera</button>
+                    </div>
+                </div>
+                <div class="card-body p-0 video-container">
+                    <img id="videoFeed" src="" alt="Camera chưa bật hoặc đang tải...">
+                </div>
+            </div>
+        </div>
+
+        <div class="col-lg-4 mb-4">
+            <div class="card status-card">
+                <div class="card-header bg-white">
+                    <h5 class="mb-0">📋 Trạng thái An toàn</h5>
+                </div>
+                <div class="card-body">
+                    <div class="row text-center mb-3">
+                        <div class="col-6">
+                            <div class="border rounded p-2">
+                                <h3 class="text-primary" id="totalPersons">0</h3>
+                                <small class="text-muted">Người phát hiện</small>
+                            </div>
+                        </div>
+                        <div class="col-6">
+                            <div class="border rounded p-2">
+                                <h3 class="text-danger" id="totalViolations">0</h3>
+                                <small class="text-muted">Vi phạm</small>
+                            </div>
+                        </div>
+                    </div>
+
+                    <h6 class="text-muted border-bottom pb-2">Chi tiết từng người:</h6>
+                    <div class="table-responsive">
+                        <table class="table table-hover align-middle">
+                            <thead class="table-light">
+                                <tr>
+                                    <th>ID</th>
+                                    <th>Trạng thái</th>
+                                    <th>Thiếu</th>
+                                </tr>
+                            </thead>
+                            <tbody id="statusTableBody">
+                                <tr><td colspan="3" class="text-center text-muted">Đang chờ dữ liệu...</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<footer class="text-center py-3 text-muted border-top mt-auto">
+    <small>Hệ thống giám sát an toàn lao động &copy; 2026</small>
+</footer>
+
+<script>
+    // --- 1. CẤU HÌNH ĐỊA CHỈ API ---
+    // Logic: Nếu mở file trực tiếp, mặc định localhost.
+    // Nếu chạy qua mạng LAN, tự động lấy IP của trình duyệt đang truy cập.
+    let API_HOST = "http://127.0.0.1:8000"; 
+    
+    if (window.location.hostname && window.location.hostname !== "") {
+        // Ví dụ: Nếu bạn vào web bằng 192.168.1.10:5500, nó sẽ set API là 192.168.1.10:8000
+        API_HOST = `http://${window.location.hostname}:8000`;
+    }
+
+    document.getElementById("apiAddress").innerText = "API: " + API_HOST;
+    
+    const VIDEO_URL = API_HOST + "/video_feed";
+    const RESULT_URL = API_HOST + "/camera/result";
+    const START_URL = API_HOST + "/camera/start";
+    const STOP_URL  = API_HOST + "/camera/stop";
+
+    const videoImg = document.getElementById("videoFeed");
+    let isStreaming = false;
+    let dataInterval = null;
+
+    // --- 2. CÁC HÀM ĐIỀU KHIỂN ---
+
+    async function startCamera() {
+        try {
+            await fetch(START_URL, { method: 'POST' });
+            console.log("Đã gửi lệnh bật camera");
+            
+            // Cập nhật src cho thẻ img để bắt đầu load stream
+            // Thêm ?t=... để tránh cache trình duyệt
+            videoImg.src = VIDEO_URL + "?t=" + new Date().getTime();
+            
+            isStreaming = true;
+            document.getElementById("liveDot").classList.add("live-active");
+            
+            // Bắt đầu lấy dữ liệu JSON liên tục
+            if (!dataInterval) {
+                dataInterval = setInterval(fetchData, 500); // Lấy data mỗi 0.5 giây
+            }
+        } catch (error) {
+            alert("Không thể kết nối tới Backend! Hãy kiểm tra server.");
+            console.error(error);
+        }
+    }
+
+    async function stopCamera() {
+        try {
+            await fetch(STOP_URL, { method: 'POST' });
+            console.log("Đã gửi lệnh tắt camera");
+            
+            videoImg.src = ""; // Ngắt kết nối ảnh
+            videoImg.alt = "Camera đã tắt.";
+            
+            isStreaming = false;
+            document.getElementById("liveDot").classList.remove("live-active");
+            
+            if (dataInterval) {
+                clearInterval(dataInterval);
+                dataInterval = null;
+            }
+        } catch (error) {
+            console.error(error);
+        }
+    }
+
+    // --- 3. HÀM CẬP NHẬT GIAO DIỆN (DASHBOARD) ---
+    async function fetchData() {
+        if (!isStreaming) return;
+
+        try {
+            const response = await fetch(RESULT_URL);
+            const data = await response.json();
+            
+            // data cấu trúc: { persons: [...], ppe_detections: [...] }
+            renderTable(data.persons);
+        } catch (error) {
+            console.warn("Lỗi khi lấy dữ liệu status:", error);
+        }
+    }
+
+    function renderTable(persons) {
+        const tbody = document.getElementById("statusTableBody");
+        const totalPersonsEl = document.getElementById("totalPersons");
+        const totalViolationsEl = document.getElementById("totalViolations");
+
+        totalPersonsEl.innerText = persons.length;
+        
+        let violationCount = 0;
+        let html = "";
+
+        if (persons.length === 0) {
+            tbody.innerHTML = `<tr><td colspan="3" class="text-center text-muted">Không phát hiện người</td></tr>`;
+            totalViolationsEl.innerText = 0;
+            return;
+        }
+
+        persons.forEach(p => {
+            // p cấu trúc: { person_id, safe, missing, ... }
+            if (!p.safe) violationCount++;
+
+            const statusText = p.safe 
+                ? '<span class="status-safe">✅ SAFE</span>' 
+                : '<span class="status-unsafe">⚠️ UNSAFE</span>';
+
+            // Tạo các badge cho đồ bị thiếu
+            let missingHtml = "";
+            if (p.missing && p.missing.length > 0) {
+                p.missing.forEach(item => {
+                    missingHtml += `<span class="missing-item">${item}</span>`;
+                });
+            } else if (p.safe) {
+                missingHtml = '<span class="text-success small">Đủ đồ bảo hộ</span>';
+            }
+
+            html += `
+                <tr>
+                    <td><strong>#${p.person_id}</strong></td>
+                    <td>${statusText}</td>
+                    <td>${missingHtml}</td>
+                </tr>
+            `;
+        });
+
+        tbody.innerHTML = html;
+        totalViolationsEl.innerText = violationCount;
+    }
+</script>
+
+</body>
+</html>
